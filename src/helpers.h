@@ -4,7 +4,6 @@
 #include <math.h>
 #include <string>
 #include <vector>
-#include <tuple>
 
 // for convenience
 using std::string;
