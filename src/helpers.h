@@ -158,25 +158,67 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s,
 bool laneCheck(int lane_id, vector<vector<double>> cars_map, double car_s, double car_speed)
 {
 	bool lane_open = true;
+	double safe_dist = 20.0; // m
 	for (int i=0; i<cars_map.size(); i++)
 	{
 		double s = cars_map[i][5];
 		double d = cars_map[i][6];
 		if (d > 4*lane_id && d < 4*(lane_id+1))
 		{
-			// Check for nearest car behind in check lane
-			if (car_s > s && (car_s-s) < 30.0)
-			{
-			   lane_open = false;
-			}
-			// Check for nearest car ahead in check lane
-			if (s > car_s && (s-car_s) < 30.0)
+			// Check for nearest car behind and ahead in lane
+			if ((car_s > s && (car_s-s) < safe_dist) || (s > car_s && (s-car_s) < safe_dist))
 			{
 			   lane_open = false;
 			}
 		}
 	}
 	return lane_open;
+}
+
+// Evaluate cost of being in each lane
+double laneCost(int lane_id, vector<vector<double>> cars_map, double car_s, double car_speed, double ref_dist)
+{
+	double delta_s_behind = ref_dist;
+	double v_behind = 0.0;
+	double delta_s_ahead = ref_dist;
+	double v_ahead = car_speed;
+	for (int i=0; i<cars_map.size(); i++)
+	{
+		double vx = cars_map[i][3];
+		double vy = cars_map[i][4];
+		double v = sqrt(pow(vx,2)+pow(vy,2));
+		double s = cars_map[i][5];
+		double d = cars_map[i][6];
+		
+		if (d > 4*lane_id && d <= 4*(lane_id+1))
+		{
+			// Check for nearest car behind in check lane
+			if (car_s > s && (car_s-s) < delta_s_behind)
+			{
+			   delta_s_behind = car_s-s;
+			   v_behind = v;
+			}
+			// Check for nearest car ahead in check lane
+			if (s > car_s && (s-car_s) < delta_s_ahead)
+			{
+			   delta_s_ahead = s-car_s;
+			   v_ahead = v;
+			}
+		}
+	}
+	
+	/* Lane cost (from highest to lowest):
+		1. Car ahead is too close
+		2. Car ahead is much slower
+		3. Car behind is much faster
+		4. Car behind is too close
+	If all lane costs are equal, hold lane and slow down if necessary */
+	double cost = exp(ref_dist/delta_s_ahead-1.0) + exp(car_speed/v_ahead-1.0) + exp(v_behind/car_speed) + exp(ref_dist/delta_s_behind-1.0);
+	
+	/* Linear cost function
+	double cost = 3*(std::max(1.0-delta_s_ahead/ref_dist,0.0)) + 2*(std::max(1.0-v_ahead/car_speed,0.0)) + (std::max(v_behind/car_speed-1.0,0.0)) + (std::max(1.0-delta_s_behind/ref_dist,0.0)); // Least value of cost is 0 */
+		
+	return cost;
 }
 
 #endif  // HELPERS_H

@@ -8,7 +8,7 @@
 #include "helpers.h"
 #include "json.hpp"
 #include "spline.h"
-#include <tuple>
+#include <algorithm> // std::min_element
 
 // for convenience
 using nlohmann::json;
@@ -53,8 +53,8 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
   
-  int current_lane = 1; // Initial (center) lane
-  double ref_vel = 0; // Initial speed
+  int current_lane = 1; // Initial lane (0: left lane, 1: center lane, 2: right lane)
+  double ref_vel = 0; // Initial reference speed (mph)
   
   h.onMessage([&ref_vel, &current_lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s, &map_waypoints_dx,&map_waypoints_dy]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
@@ -107,30 +107,30 @@ int main() {
 		   
 		   int prev_size = previous_path_x.size();
 		   double time_step = 0.02; // Code and sim execution rate (sec)
-		   double max_speed = 49.5; // mph
-		   double ref_accel = 5; // m/s^2
+		   double max_speed = 49.5; // Speed limit (mph)
+		   double ref_accel = 5; // Max acceleration/deceleration (m/s^2)
 		   double max_delta_speed = ref_accel*time_step*2.24; // delta_v = ref_accel*time_step converted to mph
-		   double max_braking_s = pow(max_speed/2.24,2)/(2*ref_accel); // meters
-		   double lane_width = 4.0; // meters
+		   double lane_width = 4.0; // Lane width (m)
+		   double horizon = 100.0; // Range over which to evaluate lane costs (m)
 		   
 		   
 		   
 		   
 		   
-		   // ****** Sensor Fusion ****** //
+		   // ****** Behavioral planning ****** //
 		   
 		   if (prev_size > 0)
 		   {
 			   car_s = end_path_s;
 		   }
 		   bool too_close = false;
-		   double max_lane_speed = max_speed;
-		   bool no_lane_open = false;
+		   int target_lane = current_lane;
+		   double max_lane_speed = max_speed; // Used as speed limit when following a slower car (mph)
 		   
-		   // Find reference speed to use based on next car in current lane
+		   // Find lane with least cost based on traffic conditions
 		   for (int i=0; i<sensor_fusion.size(); i++)
 		   {
-			   // Check if car is in current lane
+			   // Check if another car is in the current lane
 			   float d = sensor_fusion[i][6];
 			   if (d > lane_width*current_lane && d < lane_width*(current_lane+1))
 			   {
@@ -139,40 +139,50 @@ int main() {
 				   double next_car_speed = sqrt(pow(vx,2)+pow(vy,2));
 				   double next_car_s = sensor_fusion[i][5];
 				   next_car_s += ((double)prev_size*time_step*next_car_speed);
-				   bool left_lane_open = false;
-				   bool right_lane_open = false;
+				   double stopping_s = pow(ref_vel/2.24,2)/(2*ref_accel); // Motion equation
 				   
-				   // Check if next car is within braking distance
-				   if (next_car_s > car_s && (next_car_s-car_s) < max_braking_s)
+				   // Check if next car is within stopping distance
+				   if (next_car_s > car_s && (next_car_s-car_s) < stopping_s)
 					{
-						too_close = true;
-						// Check for adjacent open lanes
-						if (current_lane > 0)
-						{
-							left_lane_open = laneCheck(current_lane-1, sensor_fusion, car_s, ref_vel);
-						}
-						if (current_lane < 2)
-						{
-							right_lane_open = laneCheck(current_lane+1, sensor_fusion, car_s, ref_vel);
-						}
+						double left_lane_cost;
+						double right_lane_cost;
+						double current_lane_cost = laneCost(current_lane, sensor_fusion, car_s, ref_vel, horizon);
+						double best_lane_cost = current_lane_cost;
+						int best_lane = current_lane;						
 						
-						if (left_lane_open == true) // Switch into left lane
+						if (current_lane > 0) // Check lane on the left
 						{
-							current_lane = current_lane-1;
+							bool left_lane_open = laneCheck(current_lane-1, sensor_fusion, car_s, ref_vel);
+							left_lane_cost = laneCost(current_lane-1, sensor_fusion, car_s, ref_vel, horizon);
+							if (left_lane_open == true && left_lane_cost < current_lane_cost)
+							{
+								best_lane = current_lane-1; // Switch (provisionally) into left lane
+								best_lane_cost = left_lane_cost;
+							}
 						}
-						else if (right_lane_open == true) // Switch into right lane
+						if (current_lane < 2) // Check lane on the right
 						{
-							current_lane = current_lane+1;
+							bool right_lane_open = laneCheck(current_lane+1, sensor_fusion, car_s, ref_vel);
+							right_lane_cost = laneCost(current_lane+1, sensor_fusion, car_s, ref_vel, horizon);
+							if (right_lane_open == true && right_lane_cost < best_lane_cost)
+							{
+								best_lane = current_lane+1; // Switch into right lane
+							}
+							// If prior to checking the right lane, the best lane was the left lane, the car would switch into the right lane if its cost were strictly lower than the left lane cost, thus inherently preferring the legally faster left lane in case of a tie
 						}
-						else // Slow down
+						if (best_lane == current_lane)
 						{
-							no_lane_open = true;
+							too_close = true; // Slow down
 							max_lane_speed = next_car_speed;
+						}
+						else
+						{
+							current_lane = best_lane; // Reassign current lane going forward
 						}
 					}
 			   }
 		   }
-		   
+		   		   
 		   
 		   
 		   
@@ -247,7 +257,7 @@ int main() {
 		   // Fill up remaining trajectory points fit to spline
 		   int total_path_size = 50; // Number of points
 		   
-		   // Calculate distance y position on 30 m ahead.
+		   // Calculate distance y position on 30 m ahead
            double target_x = 30.0;
            double target_y = s(target_x);
            double target_dist = sqrt(target_x*target_x + target_y*target_y);
@@ -256,21 +266,17 @@ int main() {
 		   for (int i=1; i<=total_path_size-previous_path_x.size(); i++)
 		   {
 			   // Accelerate or decelerate
-			   if (too_close == false)
+			   double delta_speed = 0.0;
+			   if (too_close == false && ref_vel < max_speed)
 			   {
-				   ref_vel += max_delta_speed;
-				   ref_vel = std::min(ref_vel,max_speed);
-				   if (no_lane_open == true)
-				   {
-					   ref_vel = std::max(ref_vel,max_lane_speed);
-				   }
+				   delta_speed += max_delta_speed;
 			   }
-			   else if (too_close == true)
+			   else if (too_close == true && ref_vel > max_lane_speed)
 			   {
-				   ref_vel -= max_delta_speed;
-				   ref_vel = std::max(ref_vel,max_lane_speed);
+				   delta_speed -= max_delta_speed;
 			   }
-			   double N = target_dist/(time_step*ref_vel/2.24);
+			   ref_vel += delta_speed;
+			   double N = target_dist/(time_step*ref_vel/2.24); // Split target x distance into equidistant points
 			   double x_point = x_add_on + target_x/N;
 			   double y_point = s(x_point);
 			   x_add_on = x_point;
