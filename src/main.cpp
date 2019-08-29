@@ -124,7 +124,6 @@ int main() {
 			   car_s = end_path_s;
 		   }
 		   bool too_close = false;
-		   int target_lane = current_lane;
 		   double max_lane_speed = max_speed; // Used as speed limit when following a slower car (mph)
 		   
 		   // Find lane with least cost based on traffic conditions
