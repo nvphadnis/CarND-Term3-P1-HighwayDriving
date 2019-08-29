@@ -207,12 +207,11 @@ double laneCost(int lane_id, vector<vector<double>> cars_map, double car_s, doub
 		}
 	}
 	
-	/* Lane cost (from highest to lowest):
+	/* Lane cost components:
 		1. Car ahead is too close
 		2. Car ahead is much slower
 		3. Car behind is much faster
-		4. Car behind is too close
-	If all lane costs are equal, hold lane and slow down if necessary */
+		4. Car behind is too close */
 	double cost = exp(ref_dist/delta_s_ahead-1.0) + exp(car_speed/v_ahead-1.0) + exp(v_behind/car_speed) + exp(ref_dist/delta_s_behind-1.0);
 	
 	/* Linear cost function
