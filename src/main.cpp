@@ -257,9 +257,9 @@ int main() {
 		   int total_path_size = 50; // Number of points
 		   
 		   // Calculate distance y position on 30 m ahead
-           double target_x = 30.0;
-           double target_y = s(target_x);
-           double target_dist = sqrt(target_x*target_x + target_y*target_y);
+           	   double target_x = 30.0;
+           	   double target_y = s(target_x);
+           	   double target_dist = sqrt(target_x*target_x + target_y*target_y);
 		   double x_add_on = 0.0;
 		   
 		   for (int i=1; i<=total_path_size-previous_path_x.size(); i++)
